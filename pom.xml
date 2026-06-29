@@ -16,6 +16,7 @@
         <module>user-service</module>
         <module>exercise-service</module>
         <module>learning-engine-service</module>
+        <module>ai-service</module>
         <module>api-gateway</module>
     </modules>
 

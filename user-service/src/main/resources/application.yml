@@ -8,8 +8,8 @@ spring:
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://127.0.0.1:3306/user_db?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
-    username: root
-    password: 123456
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:123456}
 
 # MyBatis-Plus 配置
 mybatis-plus:
@@ -33,5 +33,5 @@ mybatis-plus:
 
 # JWT 配置（开发环境）
 jwt:
-  secret: EnglishAI-CET4-CET6-JWT-Secret-Key-2025-Production
-  expiration: 604800000  # 7天(毫秒)
+  secret: ${JWT_SECRET:EnglishAI-Local-Dev-JWT-Secret-Key-Change-Me-32-Bytes}
+  expiration: ${JWT_EXPIRATION:604800000}  # 7天(毫秒)

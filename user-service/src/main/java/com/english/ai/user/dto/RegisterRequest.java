@@ -14,6 +14,10 @@ public class RegisterRequest {
     /** 明文密码 */
     private String password;
 
+    /** 手机号 */
+    private String phone;
+
     /** 考试级别: CET4 / CET6 */
     private String cetLevel;
 }
+

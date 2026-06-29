@@ -28,7 +28,11 @@ spring:
           uri: http://localhost:8083
           predicates:
             - Path=/learning/**
+        - id: ai-service
+          uri: http://localhost:8084
+          predicates:
+            - Path=/ai/**
 # JWT配置（与user-service一致）
 jwt:
-  secret: EnglishAI-CET4-CET6-JWT-Secret-Key-2025-Production
-  expiration: 604800000
+  secret: ${JWT_SECRET:EnglishAI-Local-Dev-JWT-Secret-Key-Change-Me-32-Bytes}
+  expiration: ${JWT_EXPIRATION:604800000}

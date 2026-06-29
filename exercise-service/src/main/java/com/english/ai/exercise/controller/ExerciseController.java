@@ -1,9 +1,7 @@
 package com.english.ai.exercise.controller;
 
 import com.english.ai.common.Result;
-import com.english.ai.exercise.dto.QuestionVO;
-import com.english.ai.exercise.dto.SubmitRequest;
-import com.english.ai.exercise.dto.SubmitResponse;
+import com.english.ai.exercise.dto.*;
 import com.english.ai.exercise.entity.SysKnowledgePoint;
 import com.english.ai.exercise.service.ExerciseService;
 import lombok.RequiredArgsConstructor;
@@ -12,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -114,5 +113,103 @@ public class ExerciseController {
     public Result<List<SysKnowledgePoint>> knowledgePoints(@RequestParam(defaultValue = "CET4") String cetLevel) {
         List<SysKnowledgePoint> points = exerciseService.getKnowledgePoints(cetLevel);
         return Result.success(points);
+    }
+
+    /**
+     * 每日单词
+     * GET /exercise/daily-word?level=CET4
+     */
+    @GetMapping("/daily-word")
+    public Result<DailyWordVO> getDailyWord(@RequestParam(defaultValue = "CET4") String level) {
+        DailyWordVO vo = exerciseService.getDailyWord(level);
+        log.info("每日单词: level={}, word={}", level, vo.getWord());
+        return Result.success(vo);
+    }
+
+    /**
+     * 用户答题统计（热力图、学习时间、词汇量等）
+     * GET /exercise/stats/{userId}
+     */
+    @GetMapping("/stats/{userId}")
+    public Result<UserExerciseStats> getUserStats(@PathVariable Long userId) {
+        UserExerciseStats stats = exerciseService.getUserStats(userId);
+        log.info("用户答题统计: userId={}, 总答题={}, 正确={}, 活跃天数={}",
+                userId, stats.getTotalAnswered(), stats.getCorrectCount(), stats.getActiveDays());
+        return Result.success(stats);
+    }
+
+    // ========== 收藏句 ==========
+
+    /** POST /exercise/favorites */
+    @PostMapping("/favorites")
+    public Result<FavoriteVO> addFavorite(@RequestBody AddFavoriteRequest request) {
+        if (request.getUserId() == null || request.getSentenceText() == null || request.getSentenceText().isBlank()) {
+            return Result.badRequest("userId和sentenceText不能为空");
+        }
+        FavoriteVO vo = exerciseService.addFavorite(request.getUserId(), request.getSentenceText(), request.getQuestionId());
+        return Result.success(vo);
+    }
+
+    /** GET /exercise/favorites/{userId} */
+    @GetMapping("/favorites/{userId}")
+    public Result<List<FavoriteVO>> getFavorites(@PathVariable Long userId) {
+        return Result.success(exerciseService.getFavorites(userId));
+    }
+
+    /** DELETE /exercise/favorites/{id}?userId=1 */
+    @DeleteMapping("/favorites/{id}")
+    public Result<String> removeFavorite(@PathVariable Long id, @RequestParam Long userId) {
+        exerciseService.removeFavorite(id, userId);
+        return Result.success("已删除");
+    }
+
+    // ========== 单词本 ==========
+
+    /** POST /exercise/vocabulary */
+    @PostMapping("/vocabulary")
+    public Result<VocabularyVO> addVocabulary(@RequestBody AddVocabularyRequest request) {
+        if (request.getUserId() == null || request.getWord() == null || request.getWord().isBlank()) {
+            return Result.badRequest("userId和word不能为空");
+        }
+        VocabularyVO vo = exerciseService.addVocabulary(request.getUserId(), request.getWord(), request.getTranslation());
+        return Result.success(vo);
+    }
+
+    /** GET /exercise/vocabulary/{userId} */
+    @GetMapping("/vocabulary/{userId}")
+    public Result<List<VocabularyVO>> getVocabulary(@PathVariable Long userId) {
+        return Result.success(exerciseService.getVocabulary(userId));
+    }
+
+    /** DELETE /exercise/vocabulary/{id}?userId=1 */
+    @DeleteMapping("/vocabulary/{id}")
+    public Result<String> removeVocabulary(@PathVariable Long id, @RequestParam Long userId) {
+        exerciseService.removeVocabulary(id, userId);
+        return Result.success("已删除");
+    }
+
+    /** PUT /exercise/vocabulary/{id}/toggle?userId=1 */
+    @PutMapping("/vocabulary/{id}/toggle")
+    public Result<VocabularyVO> toggleMastered(@PathVariable Long id, @RequestParam Long userId) {
+        VocabularyVO vo = exerciseService.toggleMastered(id, userId);
+        return Result.success(vo);
+    }
+
+    // ========== 学习历史 ==========
+
+    /** GET /exercise/history/{userId}?page=1&size=20 */
+    @GetMapping("/history/{userId}")
+    public Result<Map<String, Object>> getExerciseHistory(
+            @PathVariable Long userId,
+            @RequestParam(defaultValue = "1") Integer page,
+            @RequestParam(defaultValue = "20") Integer size) {
+        List<ExerciseHistoryVO> list = exerciseService.getExerciseHistory(userId, page, size);
+        long total = exerciseService.getExerciseHistoryCount(userId);
+        Map<String, Object> result = new java.util.HashMap<>();
+        result.put("records", list);
+        result.put("total", total);
+        result.put("page", page);
+        result.put("size", size);
+        return Result.success(result);
     }
 }

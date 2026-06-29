@@ -4,17 +4,16 @@ import org.springframework.amqp.core.*;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
  * RabbitMQ 配置 — exercise-service（生产者端）
- *
- * Exchange: exercise.exchange (topic)
- * Queue:    exercise.complete.queue
- * Binding:  exercise.complete → exercise.complete.queue
+ * 当 spring.rabbitmq.enabled=false 时自动禁用RabbitMQ相关Bean
  */
 @Configuration
+@ConditionalOnProperty(prefix = "spring.rabbitmq", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class RabbitMQConfig {
 
     public static final String EXCHANGE_NAME = "exercise.exchange";

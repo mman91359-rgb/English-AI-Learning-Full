@@ -31,6 +31,9 @@ public class QuestionVO {
     /** 正确答案（练习模式不返回，提交后才展示） */
     private String correctAnswer;
 
+    /** 提示（正确答案前2个字母，练习模式可用） */
+    private String hint;
+
     /** 题目解析 */
     private String analysis;
 

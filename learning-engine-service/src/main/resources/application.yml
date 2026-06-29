@@ -8,15 +8,16 @@ spring:
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://127.0.0.1:3306/learning_db?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
-    username: root
-    password: 123456
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:123456}
 
-  # RabbitMQ 消息队列
+  # RabbitMQ 消息队列（本地无RabbitMQ时设为enabled: false）
   rabbitmq:
+    enabled: false
     host: localhost
     port: 5672
-    username: admin
-    password: admin
+    username: ${RABBITMQ_USERNAME:admin}
+    password: ${RABBITMQ_PASSWORD:admin}
     listener:
       simple:
         acknowledge-mode: manual

@@ -30,6 +30,9 @@ public class SysUser {
     /** 考试级别: CET4 / CET6 */
     private String cetLevel;
 
+    /** 手机号 */
+    private String phone;
+
     /** 角色: ROLE_USER / ROLE_ADMIN */
     private String roles;
 
@@ -47,3 +50,4 @@ public class SysUser {
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedAt;
 }
+

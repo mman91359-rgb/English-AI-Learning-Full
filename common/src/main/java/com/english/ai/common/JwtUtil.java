@@ -15,13 +15,21 @@ import java.util.Date;
  */
 public class JwtUtil {
 
-    /** 密钥（生产环境应从Nacos配置中心读取） */
-    private static final String SECRET = "EnglishAI-CET4-CET6-JWT-Secret-Key-2025-Production";
+    /** 密钥：生产环境必须通过 JWT_SECRET 环境变量注入。 */
+    private static final String SECRET = resolveSecret();
 
     /** Token有效期：7天 */
     private static final long EXPIRATION_MILLIS = 7 * 24 * 60 * 60 * 1000L;
 
     private static final SecretKey KEY = Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));
+
+    private static String resolveSecret() {
+        String secret = System.getenv("JWT_SECRET");
+        if (secret != null && !secret.isBlank()) {
+            return secret;
+        }
+        return "EnglishAI-Local-Dev-JWT-Secret-Key-Change-Me-32-Bytes";
+    }
 
     /**
      * 生成JWT Token

@@ -37,6 +37,7 @@ public class UserServiceImpl implements UserService {
         user.setPassword(PasswordUtil.encode(request.getPassword()));
         user.setNickname(request.getUsername());
         user.setCetLevel(request.getCetLevel());
+        user.setPhone(request.getPhone());
         user.setRoles("ROLE_USER");
         user.setStatus(1);
 
@@ -113,3 +114,4 @@ public class UserServiceImpl implements UserService {
         return "初心者";
     }
 }
+

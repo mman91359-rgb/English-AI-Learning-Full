@@ -4,6 +4,11 @@ import com.english.ai.exercise.dto.QuestionVO;
 import com.english.ai.exercise.dto.SubmitRequest;
 import com.english.ai.exercise.dto.SubmitResponse;
 import com.english.ai.exercise.dto.ReviewTaskVO;
+import com.english.ai.exercise.dto.UserExerciseStats;
+import com.english.ai.exercise.dto.FavoriteVO;
+import com.english.ai.exercise.dto.VocabularyVO;
+import com.english.ai.exercise.dto.ExerciseHistoryVO;
+import com.english.ai.exercise.dto.DailyWordVO;
 import com.english.ai.exercise.entity.SysKnowledgePoint;
 
 import java.util.List;
@@ -15,9 +20,6 @@ public interface ExerciseService {
 
     /**
      * 智能选题
-     * @param userId     用户ID
-     * @param moduleType 1=词汇, 2=语法
-     * @param count      题目数量
      */
     List<QuestionVO> selectQuestions(Long userId, Integer moduleType, int count);
 
@@ -50,4 +52,47 @@ public interface ExerciseService {
      * 知识点树
      */
     List<SysKnowledgePoint> getKnowledgePoints(String cetLevel);
+
+    /**
+     * 每日单词（全局统一，按日期固定）
+     */
+    DailyWordVO getDailyWord(String cetLevel);
+
+    /**
+     * 用户答题统计（用于热力图、学习时间等）
+     */
+    UserExerciseStats getUserStats(Long userId);
+
+    // ========== 收藏句 ==========
+
+    /** 添加收藏 */
+    FavoriteVO addFavorite(Long userId, String sentenceText, Long questionId);
+
+    /** 收藏列表 */
+    List<FavoriteVO> getFavorites(Long userId);
+
+    /** 删除收藏 */
+    void removeFavorite(Long id, Long userId);
+
+    // ========== 单词本 ==========
+
+    /** 添加单词 */
+    VocabularyVO addVocabulary(Long userId, String word, String translation);
+
+    /** 单词本列表 */
+    List<VocabularyVO> getVocabulary(Long userId);
+
+    /** 删除单词 */
+    void removeVocabulary(Long id, Long userId);
+
+    /** 切换掌握状态 */
+    VocabularyVO toggleMastered(Long id, Long userId);
+
+    // ========== 学习历史 ==========
+
+    /** 答题历史（分页） */
+    List<ExerciseHistoryVO> getExerciseHistory(Long userId, Integer page, Integer size);
+
+    /** 历史总数 */
+    long getExerciseHistoryCount(Long userId);
 }

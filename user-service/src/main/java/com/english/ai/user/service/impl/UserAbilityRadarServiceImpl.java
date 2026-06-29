@@ -49,13 +49,7 @@ public class UserAbilityRadarServiceImpl implements UserAbilityRadarService {
 
     @Override
     public int updateElo(Long userId, int questionDifficulty, boolean isCorrect, boolean isAssess) {
-        UserAbilityRadar radar = getByUserId(userId);
-        if (radar == null) {
-            log.warn("雷达记录不存在, 自动创建: userId={}", userId);
-            initRadar(userId, "CET4");
-            radar = getByUserId(userId);
-        }
-
+        UserAbilityRadar radar = getOrCreateRadar(userId);
         int oldElo = radar.getEloScore();
         int newElo = isAssess
                 ? EloCalculator.calculateAssess(oldElo, questionDifficulty, isCorrect)
@@ -66,8 +60,53 @@ public class UserAbilityRadarServiceImpl implements UserAbilityRadarService {
 
         log.info("ELO更新: userId={}, difficulty={}, correct={}, isAssess={}, {}→{}",
                 userId, questionDifficulty, isCorrect, isAssess, oldElo, newElo);
-
         return newElo;
+    }
+
+    @Override
+    public void updateModuleScore(Long userId, int moduleType, boolean isCorrect) {
+        UserAbilityRadar radar = getOrCreateRadar(userId);
+        BigDecimal current = getModuleScore(radar, moduleType);
+        // 移动加权平均: 正确+10%剩余距离, 错误-10%当前值
+        double rate = 0.1;
+        double newVal = isCorrect
+                ? current.doubleValue() + (100.0 - current.doubleValue()) * rate
+                : current.doubleValue() * (1.0 - rate);
+        newVal = Math.max(0, Math.min(100, newVal));
+        BigDecimal newScore = BigDecimal.valueOf(Math.round(newVal * 10) / 10.0);
+        setModuleScore(radar, moduleType, newScore);
+        radarMapper.updateById(radar);
+        log.info("模块分更新: userId={}, moduleType={}, correct={}, {}→{}",
+                userId, moduleType, isCorrect, current, newScore);
+    }
+
+    private UserAbilityRadar getOrCreateRadar(Long userId) {
+        UserAbilityRadar radar = getByUserId(userId);
+        if (radar == null) {
+            log.warn("雷达记录不存在, 自动创建: userId={}", userId);
+            initRadar(userId, "CET4");
+            radar = getByUserId(userId);
+        }
+        return radar;
+    }
+
+    private BigDecimal getModuleScore(UserAbilityRadar radar, int moduleType) {
+        return switch (moduleType) {
+            case 1 -> radar.getVocabularyScore();
+            case 2 -> radar.getGrammarScore();
+            case 3 -> radar.getListeningScore();
+            case 4 -> radar.getReadingScore();
+            default -> BigDecimal.ZERO;
+        };
+    }
+
+    private void setModuleScore(UserAbilityRadar radar, int moduleType, BigDecimal score) {
+        switch (moduleType) {
+            case 1 -> radar.setVocabularyScore(score);
+            case 2 -> radar.setGrammarScore(score);
+            case 3 -> radar.setListeningScore(score);
+            case 4 -> radar.setReadingScore(score);
+        }
     }
 
     @Override

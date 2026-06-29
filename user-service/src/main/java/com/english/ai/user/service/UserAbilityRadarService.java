@@ -15,6 +15,9 @@ public interface UserAbilityRadarService {
     /** 更新ELO分（答题后调） */
     int updateElo(Long userId, int questionDifficulty, boolean isCorrect, boolean isAssess);
 
+    /** 更新模块维度分（答题后调用，移动加权平均） */
+    void updateModuleScore(Long userId, int moduleType, boolean isCorrect);
+
     /** 获取能力雷达图数据（供前端） */
     Map<String, Object> getRadarData(Long userId);
 }

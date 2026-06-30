@@ -589,11 +589,15 @@ public class ExerciseServiceImpl implements ExerciseService {
         // 8. 词汇理解度 = 正确率
         double vocabularyComprehension = correctRate;
 
-        // 9. 生成年度热力图数据 + 每日学习时长（过去365天）
+        // 9. 生成年度热力图数据 + 每日学习时长（当前年 1月1日 ~ 12月31日，按自然年排版）
         List<UserExerciseStats.DailyActivity> heatmapData = new ArrayList<>();
         List<Integer> yearlyStudyMinutes = new ArrayList<>();
-        java.time.LocalDate startOfYear = today.minusDays(364);
-        for (int i = 0; i < 365; i++) {
+        int currentYear = today.getYear();
+        java.time.LocalDate startOfYear = java.time.LocalDate.of(currentYear, 1, 1);
+        java.time.LocalDate endOfYear = java.time.LocalDate.of(currentYear, 12, 31);
+        // 计算当前年总天数（兼容闰年 366 天与平年 365 天）
+        long totalDaysOfYear = java.time.temporal.ChronoUnit.DAYS.between(startOfYear, endOfYear) + 1;
+        for (int i = 0; i < totalDaysOfYear; i++) {
             java.time.LocalDate d = startOfYear.plusDays(i);
             List<UserExerciseLog> dayLogs = byDate.getOrDefault(d, Collections.emptyList());
             int count = dayLogs.size();
@@ -637,16 +641,15 @@ public class ExerciseServiceImpl implements ExerciseService {
             recentWeekQuestionCounts.add(dayLogs.size());
         }
 
-        // 10.1 本周平均每天答题数（最近7天每日答题数的平均值，四舍五入保留1位小数）
+        // 10.1 本周平均每天答题数（最近7天每日答题数的平均值，四舍五入取整）
         double weeklyAvgQuestions = recentWeekQuestionCounts.stream()
                 .mapToInt(Integer::intValue)
                 .average()
                 .orElse(0.0);
-        double weeklyAverageQuestions = Math.round(weeklyAvgQuestions * 10.0) / 10.0;
+        int weeklyAverageQuestions = (int) Math.round(weeklyAvgQuestions);
 
         // 10.2 本年 1~12 月每月答题总数（12个元素，下标0对应1月）
         List<Integer> yearlyMonthQuestions = new ArrayList<>();
-        int currentYear = today.getYear();
         for (int m = 1; m <= 12; m++) {
             java.time.YearMonth ym = java.time.YearMonth.of(currentYear, m);
             // 统计该月答题总数

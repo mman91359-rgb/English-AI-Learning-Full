@@ -86,6 +86,8 @@ public class UserServiceImpl implements UserService {
                 .userId(user.getId())
                 .username(user.getUsername())
                 .nickname(user.getNickname())
+                .avatarUrl(user.getAvatarUrl())
+                .phone(user.getPhone())
                 .cetLevel(user.getCetLevel())
                 .roles(user.getRoles())
                 .eloScore(eloScore)
@@ -103,6 +105,72 @@ public class UserServiceImpl implements UserService {
         LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(SysUser::getUsername, username);
         return userMapper.selectOne(wrapper);
+    }
+
+    /**
+     * 更新用户头像URL
+     */
+    @Override
+    public void updateAvatarUrl(Long userId, String avatarUrl) {
+        SysUser user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new RuntimeException("用户不存在");
+        }
+        user.setAvatarUrl(avatarUrl);
+        userMapper.updateById(user);
+        log.info("用户头像更新成功: userId={}, avatarUrl={}", userId, avatarUrl);
+    }
+
+    /**
+     * 更新用户昵称
+     */
+    @Override
+    public void updateNickname(Long userId, String nickname) {
+        SysUser user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new RuntimeException("用户不存在");
+        }
+        user.setNickname(nickname);
+        userMapper.updateById(user);
+        log.info("用户昵称更新成功: userId={}, nickname={}", userId, nickname);
+    }
+
+    /**
+     * 修改密码 — 需校验原密码
+     */
+    @Override
+    public boolean updatePassword(Long userId, String oldPassword, String newPassword) {
+        SysUser user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new RuntimeException("用户不存在");
+        }
+        // 校验原密码
+        if (!PasswordUtil.matches(oldPassword, user.getPassword())) {
+            throw new RuntimeException("原密码错误");
+        }
+        // 加密新密码并更新
+        user.setPassword(PasswordUtil.encode(newPassword));
+        userMapper.updateById(user);
+        log.info("用户密码修改成功: userId={}", userId);
+        return true;
+    }
+
+    /**
+     * 绑定/更新手机号
+     */
+    @Override
+    public void updatePhone(Long userId, String phone) {
+        SysUser user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new RuntimeException("用户不存在");
+        }
+        // 校验手机号格式（11位数字，1开头）
+        if (phone == null || !phone.matches("^1\\d{10}$")) {
+            throw new RuntimeException("手机号格式不正确");
+        }
+        user.setPhone(phone);
+        userMapper.updateById(user);
+        log.info("用户手机号绑定成功: userId={}, phone={}", userId, phone);
     }
 
     private String eloToLevel(int elo) {

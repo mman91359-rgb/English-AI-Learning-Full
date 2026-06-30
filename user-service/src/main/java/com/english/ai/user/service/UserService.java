@@ -29,4 +29,25 @@ public interface UserService {
      * 根据用户名查询用户
      */
     SysUser getByUsername(String username);
+
+    /**
+     * 更新用户头像URL
+     */
+    void updateAvatarUrl(Long userId, String avatarUrl);
+
+    /**
+     * 更新用户昵称
+     */
+    void updateNickname(Long userId, String nickname);
+
+    /**
+     * 修改密码 — 需校验原密码
+     * @return 校验失败抛 RuntimeException，成功返回 true
+     */
+    boolean updatePassword(Long userId, String oldPassword, String newPassword);
+
+    /**
+     * 绑定/更新手机号
+     */
+    void updatePhone(Long userId, String phone);
 }

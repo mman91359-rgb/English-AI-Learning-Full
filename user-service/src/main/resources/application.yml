@@ -5,11 +5,22 @@ spring:
   application:
     name: user-service
 
+  # 文件上传配置
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
+
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://127.0.0.1:3306/user_db?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/user_db?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: ${MYSQL_USERNAME:root}
     password: ${MYSQL_PASSWORD:123456}
+
+# 头像文件存储配置
+avatar:
+  # 存储目录（绝对路径），默认为项目根目录下的 uploads/avatars
+  upload-dir: ${AVATAR_UPLOAD_DIR:./uploads/avatars}
 
 # MyBatis-Plus 配置
 mybatis-plus:

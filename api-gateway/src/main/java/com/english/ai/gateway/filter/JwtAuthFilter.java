@@ -33,7 +33,9 @@ public class JwtAuthFilter implements GlobalFilter, Ordered {
     /** 无需认证的路径 */
     private static final List<String> WHITELIST = List.of(
             "/user/register",
-            "/user/login"
+            "/user/login",
+            // 头像静态资源（浏览器 <img> 加载无法携带 JWT，单独放行）
+            "/user/avatar/"
     );
 
     @Value("${jwt.secret}")

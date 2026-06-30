@@ -10,9 +10,16 @@ import com.english.ai.user.service.UserAbilityRadarService;
 import com.english.ai.user.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 用户服务控制器
@@ -25,6 +32,10 @@ public class UserController {
 
     private final UserService userService;
     private final UserAbilityRadarService radarService;
+
+    /** 头像文件存储目录，从配置文件读取 */
+    @Value("${avatar.upload-dir:./uploads/avatars}")
+    private String avatarUploadDir;
 
     // ========== 注册/登录 ==========
 
@@ -84,6 +95,164 @@ public class UserController {
         }
         user.setPassword(null);
         return Result.success(user);
+    }
+
+    // ========== 头像上传 ==========
+
+    /**
+     * 上传用户头像
+     * POST /user/avatar/upload
+     * 参数: userId (表单字段) + file (头像文件)
+     * 返回: avatarUrl (头像访问路径)
+     */
+    @PostMapping("/avatar/upload")
+    public Result<String> uploadAvatar(
+            @RequestParam("userId") Long userId,
+            @RequestParam("file") MultipartFile file) {
+
+        // 校验文件
+        if (file == null || file.isEmpty()) {
+            return Result.badRequest("请选择头像文件");
+        }
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.startsWith("image/")) {
+            return Result.badRequest("只能上传图片文件");
+        }
+        // 限制文件大小 5MB
+        if (file.getSize() > 5 * 1024 * 1024) {
+            return Result.badRequest("头像文件不能超过5MB");
+        }
+
+        try {
+            // 确保存储目录存在
+            Path uploadPath = Paths.get(avatarUploadDir).toAbsolutePath().normalize();
+            Files.createDirectories(uploadPath);
+
+            // 生成唯一文件名，保留原始扩展名
+            String originalFilename = file.getOriginalFilename();
+            String extension = "";
+            if (originalFilename != null && originalFilename.contains(".")) {
+                extension = originalFilename.substring(originalFilename.lastIndexOf("."));
+            }
+            String filename = userId + "_" + UUID.randomUUID().toString().replace("-", "") + extension;
+
+            // 保存文件到磁盘
+            Path filePath = uploadPath.resolve(filename);
+            file.transferTo(filePath.toFile());
+
+            // 构建头像访问URL（通过后端静态资源接口访问）
+            String avatarUrl = "/user/avatar/" + filename;
+
+            // 更新数据库中的头像URL
+            userService.updateAvatarUrl(userId, avatarUrl);
+
+            log.info("头像上传成功: userId={}, avatarUrl={}", userId, avatarUrl);
+            return Result.success(avatarUrl);
+
+        } catch (IOException e) {
+            log.error("头像上传失败: userId={}", userId, e);
+            return Result.error(500, "头像上传失败，请稍后重试");
+        }
+    }
+
+    // ========== 修改昵称 ==========
+
+    /**
+     * 修改用户昵称
+     * POST /user/nickname/update
+     * Body: {"userId": 1, "nickname": "新昵称"}
+     */
+    @PostMapping("/nickname/update")
+    public Result<String> updateNickname(@RequestBody Map<String, Object> body) {
+        Object userIdObj = body.get("userId");
+        Object nicknameObj = body.get("nickname");
+        if (userIdObj == null) {
+            return Result.badRequest("userId不能为空");
+        }
+        if (nicknameObj == null || String.valueOf(nicknameObj).isBlank()) {
+            return Result.badRequest("昵称不能为空");
+        }
+        Long userId = Long.valueOf(String.valueOf(userIdObj));
+        String nickname = String.valueOf(nicknameObj).trim();
+        // 限制昵称长度
+        if (nickname.length() > 20) {
+            return Result.badRequest("昵称长度不能超过20个字符");
+        }
+        try {
+            userService.updateNickname(userId, nickname);
+            log.info("昵称修改成功: userId={}, nickname={}", userId, nickname);
+            return Result.success(nickname);
+        } catch (RuntimeException e) {
+            log.warn("昵称修改失败: userId={}, reason={}", userId, e.getMessage());
+            return Result.error(404, e.getMessage());
+        }
+    }
+
+    // ========== 修改密码 ==========
+
+    /**
+     * 修改用户密码
+     * POST /user/password/update
+     * Body: {"userId": 1, "oldPassword": "旧密码", "newPassword": "新密码"}
+     */
+    @PostMapping("/password/update")
+    public Result<Boolean> updatePassword(@RequestBody Map<String, Object> body) {
+        Object userIdObj = body.get("userId");
+        Object oldPwdObj = body.get("oldPassword");
+        Object newPwdObj = body.get("newPassword");
+        if (userIdObj == null) {
+            return Result.badRequest("userId不能为空");
+        }
+        if (oldPwdObj == null || String.valueOf(oldPwdObj).isBlank()) {
+            return Result.badRequest("原密码不能为空");
+        }
+        if (newPwdObj == null || String.valueOf(newPwdObj).length() < 6) {
+            return Result.badRequest("新密码不能少于6位");
+        }
+        Long userId = Long.valueOf(String.valueOf(userIdObj));
+        String oldPassword = String.valueOf(oldPwdObj);
+        String newPassword = String.valueOf(newPwdObj);
+        // 新旧密码不能相同
+        if (oldPassword.equals(newPassword)) {
+            return Result.badRequest("新密码不能与原密码相同");
+        }
+        try {
+            userService.updatePassword(userId, oldPassword, newPassword);
+            log.info("密码修改成功: userId={}", userId);
+            return Result.success(true);
+        } catch (RuntimeException e) {
+            log.warn("密码修改失败: userId={}, reason={}", userId, e.getMessage());
+            return Result.badRequest(e.getMessage());
+        }
+    }
+
+    // ========== 绑定手机号 ==========
+
+    /**
+     * 绑定/更新用户手机号
+     * POST /user/phone/update
+     * Body: {"userId": 1, "phone": "13800138000"}
+     */
+    @PostMapping("/phone/update")
+    public Result<String> updatePhone(@RequestBody Map<String, Object> body) {
+        Object userIdObj = body.get("userId");
+        Object phoneObj = body.get("phone");
+        if (userIdObj == null) {
+            return Result.badRequest("userId不能为空");
+        }
+        if (phoneObj == null || String.valueOf(phoneObj).isBlank()) {
+            return Result.badRequest("手机号不能为空");
+        }
+        Long userId = Long.valueOf(String.valueOf(userIdObj));
+        String phone = String.valueOf(phoneObj).trim();
+        try {
+            userService.updatePhone(userId, phone);
+            log.info("手机号绑定成功: userId={}, phone={}", userId, phone);
+            return Result.success(phone);
+        } catch (RuntimeException e) {
+            log.warn("手机号绑定失败: userId={}, reason={}", userId, e.getMessage());
+            return Result.badRequest(e.getMessage());
+        }
     }
 
     // ========== 能力雷达 / ELO ==========

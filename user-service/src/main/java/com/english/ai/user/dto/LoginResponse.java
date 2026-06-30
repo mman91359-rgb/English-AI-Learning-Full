@@ -22,6 +22,12 @@ public class LoginResponse {
     /** 昵称 */
     private String nickname;
 
+    /** 头像URL */
+    private String avatarUrl;
+
+    /** 手机号 */
+    private String phone;
+
     /** 考试级别 */
     private String cetLevel;
 

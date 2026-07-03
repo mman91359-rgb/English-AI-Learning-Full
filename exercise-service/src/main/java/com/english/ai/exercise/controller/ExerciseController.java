@@ -175,6 +175,26 @@ public class ExerciseController {
         return Result.success(vo);
     }
 
+    /**
+     * 智能添加单词：只传 userId 和 word，AI 自动补全音标/词性/释义/例句/搭配
+     * 并初始化艾宾浩斯复习计划
+     * POST /exercise/vocabulary/smart
+     */
+    @PostMapping("/vocabulary/smart")
+    public Result<VocabularyVO> addVocabularySmart(@RequestBody AddVocabularyRequest request) {
+        if (request.getUserId() == null || request.getWord() == null || request.getWord().isBlank()) {
+            return Result.badRequest("userId和word不能为空");
+        }
+        try {
+            VocabularyVO vo = exerciseService.addVocabularySmart(
+                    request.getUserId(), request.getWord(), request.getSource());
+            return Result.success(vo);
+        } catch (RuntimeException e) {
+            log.warn("智能添加单词失败: {}", e.getMessage());
+            return Result.error(e.getMessage());
+        }
+    }
+
     /** GET /exercise/vocabulary/{userId} */
     @GetMapping("/vocabulary/{userId}")
     public Result<List<VocabularyVO>> getVocabulary(@PathVariable Long userId) {
@@ -195,21 +215,100 @@ public class ExerciseController {
         return Result.success(vo);
     }
 
+    /**
+     * 获取今日待复习单词列表
+     * GET /exercise/vocabulary/review/{userId}
+     */
+    @GetMapping("/vocabulary/review/{userId}")
+    public Result<List<VocabularyVO>> getReviewList(@PathVariable Long userId) {
+        List<VocabularyVO> list = exerciseService.getReviewList(userId);
+        log.info("今日待复习: userId={}, 数量={}", userId, list.size());
+        return Result.success(list);
+    }
+
+    /**
+     * 提交单词复习结果（记住/没记住）
+     * PUT /exercise/vocabulary/{id}/review
+     */
+    @PutMapping("/vocabulary/{id}/review")
+    public Result<VocabularyVO> reviewWord(@PathVariable Long id, @RequestBody ReviewResultRequest request) {
+        if (request.getUserId() == null || request.getIsCorrect() == null) {
+            return Result.badRequest("userId和isCorrect不能为空");
+        }
+        try {
+            VocabularyVO vo = exerciseService.reviewWord(id, request.getUserId(), request.getIsCorrect());
+            return Result.success(vo);
+        } catch (RuntimeException e) {
+            log.warn("提交复习结果失败: {}", e.getMessage());
+            return Result.error(e.getMessage());
+        }
+    }
+
     // ========== 学习历史 ==========
 
-    /** GET /exercise/history/{userId}?page=1&size=20 */
+    /** GET /exercise/history/{userId}?page=1&size=20&moduleType=1&isCorrect=1&startTime=2024-01-01T00:00:00 */
     @GetMapping("/history/{userId}")
     public Result<Map<String, Object>> getExerciseHistory(
             @PathVariable Long userId,
             @RequestParam(defaultValue = "1") Integer page,
-            @RequestParam(defaultValue = "20") Integer size) {
-        List<ExerciseHistoryVO> list = exerciseService.getExerciseHistory(userId, page, size);
-        long total = exerciseService.getExerciseHistoryCount(userId);
+            @RequestParam(defaultValue = "20") Integer size,
+            @RequestParam(required = false) Integer moduleType,
+            @RequestParam(required = false) Integer isCorrect,
+            @RequestParam(required = false) String startTime) {
+        List<ExerciseHistoryVO> list = exerciseService.getExerciseHistory(userId, page, size, moduleType, isCorrect, startTime);
+        long total = exerciseService.getExerciseHistoryCount(userId, moduleType, isCorrect, startTime);
         Map<String, Object> result = new java.util.HashMap<>();
         result.put("records", list);
         result.put("total", total);
         result.put("page", page);
         result.put("size", size);
         return Result.success(result);
+    }
+
+    // ========== 错题驱动同类题生成 ==========
+
+    /**
+     * 获取用户薄弱知识点列表
+     * GET /exercise/weak-points/{userId}
+     * 统计用户所有未解决错题中每个知识点的出现次数，按次数降序返回前10个
+     */
+    @GetMapping("/weak-points/{userId}")
+    public Result<List<WeakKnowledgePoint>> getWeakPoints(@PathVariable Long userId) {
+        log.info("获取薄弱知识点: userId={}", userId);
+        List<WeakKnowledgePoint> points = exerciseService.getWeakKnowledgePoints(userId);
+        return Result.success(points);
+    }
+
+    /**
+     * 生成同类强化练习题
+     * POST /exercise/generate-similar
+     * 请求体: { "userId": 1, "questionId": 100, "count": 5 }
+     * 优先取正式题库中同知识点题目，不足部分由 AI 生成
+     */
+    @PostMapping("/generate-similar")
+    public Result<List<QuestionVO>> generateSimilar(@RequestBody Map<String, Object> request) {
+        Long userId = request.get("userId") != null
+                ? ((Number) request.get("userId")).longValue()
+                : null;
+        Long questionId = request.get("questionId") != null
+                ? ((Number) request.get("questionId")).longValue()
+                : null;
+        int count = request.get("count") != null
+                ? ((Number) request.get("count")).intValue()
+                : 5;
+
+        if (userId == null || questionId == null) {
+            return Result.badRequest("userId和questionId不能为空");
+        }
+        if (count > 20) count = 20;
+
+        log.info("生成同类题: userId={}, questionId={}, count={}", userId, questionId, count);
+        try {
+            List<QuestionVO> questions = exerciseService.generateSimilarQuestions(userId, questionId, count);
+            return Result.success(questions);
+        } catch (RuntimeException e) {
+            log.warn("生成同类题失败: {}", e.getMessage());
+            return Result.error(e.getMessage());
+        }
     }
 }

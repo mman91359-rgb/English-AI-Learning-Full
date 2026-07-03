@@ -33,6 +33,12 @@ public class QuestionInfo {
     /** 来源: MANUAL/AI/IMPORT */
     private String source;
 
+    /** AI学习到的可接受答案列表（JSON数组），如 ["circumstance","condition"] */
+    private String acceptedAnswers;
+
+    /** 是否AI生成：0=原始题目，1=AI生成的可接受答案待审核 */
+    private Integer aiGenerated;
+
     /** 被使用次数 */
     private Integer usageCount;
 

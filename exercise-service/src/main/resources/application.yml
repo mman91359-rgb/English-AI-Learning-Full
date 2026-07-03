@@ -37,3 +37,5 @@ service:
     url: ${USER_SERVICE_URL:http://localhost:8081}
   learning-engine:
     url: ${LEARNING_SERVICE_URL:http://localhost:8083}
+  ai:
+    url: ${AI_SERVICE_URL:http://localhost:8084}

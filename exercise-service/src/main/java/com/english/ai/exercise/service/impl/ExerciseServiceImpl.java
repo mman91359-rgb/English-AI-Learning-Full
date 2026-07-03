@@ -12,10 +12,16 @@ import com.english.ai.exercise.dto.FavoriteVO;
 import com.english.ai.exercise.dto.VocabularyVO;
 import com.english.ai.exercise.dto.ExerciseHistoryVO;
 import com.english.ai.exercise.dto.DailyWordVO;
+import com.english.ai.exercise.dto.WordDetailVO;
+import com.english.ai.exercise.dto.JudgmentResult;
+import com.english.ai.exercise.dto.WeakKnowledgePoint;
 import com.english.ai.exercise.entity.*;
 import com.english.ai.exercise.event.ExerciseCompletedEvent;
 import com.english.ai.exercise.mapper.*;
 import com.english.ai.exercise.service.ExerciseService;
+import com.english.ai.exercise.service.JudgmentEngine;
+import com.english.ai.exercise.service.QuestionGenerateService;
+import com.english.ai.exercise.util.EbbinghausUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -46,6 +52,8 @@ public class ExerciseServiceImpl implements ExerciseService {
     private final WordDictionaryMapper wordDictionaryMapper;
     private final DailyWordMapper dailyWordMapper;
     private final RestTemplate restTemplate;
+    private final JudgmentEngine judgmentEngine;
+    private final QuestionGenerateService questionGenerateService;
 
     @Autowired(required = false)
     private RabbitTemplate rabbitTemplate;
@@ -55,6 +63,9 @@ public class ExerciseServiceImpl implements ExerciseService {
 
     @Value("${service.learning-engine.url}")
     private String learningEngineUrl;
+
+    @Value("${service.ai.url}")
+    private String aiServiceUrl;
 
     // ============= 智能选题 =============
 
@@ -249,12 +260,55 @@ public class ExerciseServiceImpl implements ExerciseService {
             throw new RuntimeException("题目不存在");
         }
 
-        // 判分
-        String userAnswer = request.getUserAnswer() != null ? request.getUserAnswer().trim().toLowerCase() : "";
-        String correctAnswer = content.getCorrectAnswer().trim().toLowerCase();
-        boolean isCorrect = judge(userAnswer, correctAnswer);
-
         String traceId = UUID.randomUUID().toString().substring(0, 8);
+
+        boolean isCorrect;
+        String heuristicHint = null;
+        String errorType = null;
+        Integer matchedLevel = null;
+        List<String> suggestions = new ArrayList<>();
+        Boolean isSemanticMatch = null;
+
+        String judgeCorrectAnswer = content.getCorrectAnswer();
+        String judgeContext = content.getStem();
+
+        JudgmentResult judgmentResult;
+        if (request.getModuleType() != null && request.getModuleType() == 2) {
+            String[] display = buildGrammarDisplay(content, request.getUserAnswer());
+            String fullSentence = display[0] != null ? display[0] : "";
+            String correctText = display[1] != null ? display[1] : "";
+            judgeCorrectAnswer = correctText;
+
+            // 用 normalizeSentence 对比：消除标点、空格差异
+            // 用户提交的可能是完整句子也可能是填空部分
+            String normUser = normalizeSentence(request.getUserAnswer());
+            String normFull = normalizeSentence(fullSentence);
+            String normText = normalizeSentence(correctText);
+
+            if (!normUser.isEmpty() && (normUser.equals(normFull) || normUser.equals(normText))) {
+                judgmentResult = JudgmentResult.builder()
+                        .isCorrect(true)
+                        .heuristicHint("回答正确！")
+                        .matchedLevel(0)
+                        .suggestions(List.of())
+                        .build();
+            } else {
+                judgmentResult = judgmentEngine.judge(request, judgeCorrectAnswer, judgeContext);
+            }
+        } else {
+            judgmentResult = judgmentEngine.judge(request, judgeCorrectAnswer, judgeContext);
+        }
+
+        isCorrect = judgmentResult.getIsCorrect();
+        heuristicHint = judgmentResult.getHeuristicHint();
+        errorType = judgmentResult.getErrorType();
+        matchedLevel = judgmentResult.getMatchedLevel();
+        suggestions = judgmentResult.getSuggestions();
+        isSemanticMatch = judgmentResult.getIsSemanticMatch();
+
+        if (!isCorrect && heuristicHint == null) {
+            heuristicHint = "这个答案不太对哦，再想一想这个词的正确用法是什么？";
+        }
 
         // 写入答题记录
         UserExerciseLog logEntry = new UserExerciseLog();
@@ -270,6 +324,8 @@ public class ExerciseServiceImpl implements ExerciseService {
         // 错题本
         if (!isCorrect) {
             upsertErrorBook(request.getUserId(), request.getQuestionId());
+        } else {
+            resolveErrorBook(request.getUserId(), request.getQuestionId());
         }
 
         // 调用 learning-engine 更新遗忘曲线
@@ -326,8 +382,8 @@ public class ExerciseServiceImpl implements ExerciseService {
             }
         }
 
-        log.info("答题提交: userId={}, questionId={}, correct={}, traceId={}",
-                request.getUserId(), request.getQuestionId(), isCorrect, traceId);
+        log.info("答题提交: userId={}, questionId={}, correct={}, matchedLevel={}, errorType={}, traceId={}",
+                request.getUserId(), request.getQuestionId(), isCorrect, matchedLevel, errorType, traceId);
 
         return SubmitResponse.builder()
                 .isCorrect(isCorrect)
@@ -335,6 +391,11 @@ public class ExerciseServiceImpl implements ExerciseService {
                 .correctAnswerKey(extractAnswerKey(content.getCorrectAnswer()))
                 .analysis(content.getAnalysis())
                 .traceId(traceId)
+                .heuristicHint(heuristicHint)
+                .errorType(errorType)
+                .matchedLevel(matchedLevel)
+                .suggestions(suggestions)
+                .isSemanticMatch(isSemanticMatch)
                 .build();
     }
 
@@ -346,6 +407,10 @@ public class ExerciseServiceImpl implements ExerciseService {
         // 从完整答案文本（如 "A. established"）中提取选项字母
         String caKey = extractKey(ca);
         if (ua.equals(caKey)) return true;
+        // 从 "A. established" 中提取选项文本 "established" 与 ua 对比
+        // 解决前端提交选项文本（而非字母）时的判分问题
+        String caText = extractOptionText(ca);
+        if (!caText.isEmpty() && ua.equals(caText)) return true;
         // userAnswer 是字母（a-d），correctAnswer 可能以该字母开头
         if (ua.matches("[a-d]")) {
             if (ca.startsWith(ua + ".") || ca.startsWith(ua + "、") || ca.startsWith(ua + ")")) {
@@ -353,6 +418,44 @@ public class ExerciseServiceImpl implements ExerciseService {
             }
         }
         return false;
+    }
+
+    /**
+     * 规范化句子用于对比判分：
+     * 去掉所有标点符号（句号、逗号、问号、感叹号、分号、冒号、引号、括号等），
+     * 去掉多余空格，统一小写。
+     * 用于语法题（词语排序题）提交完整句子时的对比，避免标点和空格差异导致误判。
+     */
+    private String normalizeSentence(String s) {
+        if (s == null) return "";
+        return s.toLowerCase()
+                .replaceAll("[\\p{Punct}。？！，；：、\u201c\u201d\u2018\u2019（）【】《》…—]", "")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    /**
+     * 从 "A. established" 格式中提取选项纯文本 "established"
+     * 用于前端提交选项文本时与 correctAnswer（含字母前缀）做对比
+     * 输入已统一转小写
+     */
+    private String extractOptionText(String answer) {
+        if (answer == null) return "";
+        String t = answer.trim();
+        if (t.length() < 2) return "";
+        char first = t.charAt(0);
+        // 首字符为 a-d，跳过分隔符（. 、 ) 空格），返回剩余文本
+        if (first >= 'a' && first <= 'd') {
+            int i = 1;
+            while (i < t.length() && (t.charAt(i) == '.' || t.charAt(i) == '、'
+                    || t.charAt(i) == ')' || t.charAt(i) == ' ')) {
+                i++;
+            }
+            if (i < t.length()) {
+                return t.substring(i).trim();
+            }
+        }
+        return "";
     }
 
     /** 从任意格式的答案中提取纯选项字母 */
@@ -405,6 +508,24 @@ public class ExerciseServiceImpl implements ExerciseService {
         }
     }
 
+    /**
+     * 用户答对某题后，从错题本中移除该题（标记为已解决）
+     * 错题集只保留未解决的错题，解决一个少一个
+     */
+    private void resolveErrorBook(Long userId, Long questionId) {
+        UserErrorBook exist = errorBookMapper.selectOne(
+                new LambdaQueryWrapper<UserErrorBook>()
+                        .eq(UserErrorBook::getUserId, userId)
+                        .eq(UserErrorBook::getQuestionId, questionId)
+                        .eq(UserErrorBook::getIsResolved, 0));
+        if (exist != null) {
+            exist.setIsResolved(1);
+            exist.setUpdatedAt(LocalDateTime.now());
+            errorBookMapper.updateById(exist);
+            log.info("错题已解决: userId={}, questionId={}", userId, questionId);
+        }
+    }
+
     // ============= 错题本 =============
 
     @Override
@@ -421,8 +542,9 @@ public class ExerciseServiceImpl implements ExerciseService {
                 .collect(Collectors.toList());
 
         List<QuestionInfo> infos = questionInfoMapper.selectBatchIds(questionIds);
+        // 错题本需要显示正确答案（用户重做后需对照），showAnswer=true
         return infos.stream()
-                .map(qi -> toQuestionVO(qi, false))
+                .map(qi -> toQuestionVO(qi, true))
                 .collect(Collectors.toList());
     }
 
@@ -627,17 +749,21 @@ public class ExerciseServiceImpl implements ExerciseService {
             yearlyStudyMinutes.add(daySeconds / 60);
         }
 
-        // 10. 最近7天学习时长（分钟）+ 每日答题数
+        // 10. 本周学习时长（分钟）+ 每日答题数
+        // 按周一到周日顺序返回，确保与前端标签对齐
         List<Integer> recentWeekMinutes = new ArrayList<>();
         List<Integer> recentWeekQuestionCounts = new ArrayList<>();
-        for (int i = 6; i >= 0; i--) {
-            java.time.LocalDate d = today.minusDays(i);
+        // 获取本周一的日期（Java的DayOfWeek: 1=周一, 7=周日）
+        int dayOfWeek = today.getDayOfWeek().getValue();
+        java.time.LocalDate monday = today.minusDays(dayOfWeek - 1);
+        // 遍历周一到周日（7天）
+        for (int i = 0; i < 7; i++) {
+            java.time.LocalDate d = monday.plusDays(i);
             List<UserExerciseLog> dayLogs = byDate.getOrDefault(d, Collections.emptyList());
             int daySeconds = dayLogs.stream()
                     .mapToInt(l -> l.getDurationSeconds() != null ? l.getDurationSeconds() : 0)
                     .sum();
             recentWeekMinutes.add(daySeconds / 60);
-            // 当日答题数
             recentWeekQuestionCounts.add(dayLogs.size());
         }
 
@@ -818,21 +944,166 @@ public class ExerciseServiceImpl implements ExerciseService {
                 .userId(v.getUserId())
                 .word(v.getWord())
                 .translation(v.getTranslation())
+                .phonetic(v.getPhonetic())
+                .pos(v.getPos())
+                .example(v.getExample())
+                .exampleTranslation(v.getExampleTranslation())
+                .collocation(v.getCollocation())
+                .source(v.getSource())
+                .reviewCount(v.getReviewCount())
+                .masteryLevel(v.getMasteryLevel())
+                .lastReviewedAt(v.getLastReviewedAt())
+                .nextReviewAt(v.getNextReviewAt())
                 .isMastered(v.getIsMastered())
                 .createdAt(v.getCreatedAt())
                 .updatedAt(v.getUpdatedAt())
                 .build();
     }
 
+    /**
+     * 智能添加单词：调用 ai-service 的 /ai/word-detail 接口自动补全音标/词性/释义/例句/搭配
+     * 然后写入 user_vocabulary 表，并初始化艾宾浩斯复习计划（next_review_at = 明天）
+     */
+    @Override
+    public VocabularyVO addVocabularySmart(Long userId, String word, String source) {
+        String w = word == null ? "" : word.trim();
+        if (w.isEmpty()) throw new RuntimeException("单词不能为空");
+
+        // 调用 ai-service 获取单词详情
+        WordDetailVO detail = fetchWordDetailFromAi(w);
+
+        UserVocabulary v = new UserVocabulary();
+        v.setUserId(userId);
+        v.setWord(w);
+        v.setIsMastered(0);
+        v.setSource(source == null || source.isBlank() ? "manual" : source);
+        v.setReviewCount(0);
+        v.setMasteryLevel(0);
+        v.setNextReviewAt(EbbinghausUtil.nextReviewAt(0));
+
+        if (detail != null) {
+            v.setPhonetic(detail.getPhonetic());
+            v.setPos(detail.getPos());
+            v.setTranslation(detail.getTranslation());
+            v.setExample(detail.getExample());
+            v.setExampleTranslation(detail.getExampleTranslation());
+            v.setCollocation(detail.getCollocation());
+        } else {
+            // AI 不可用兜底：translation 留空，前端引导用户手动补
+            v.setTranslation("");
+        }
+
+        vocabularyMapper.insert(v);
+        log.info("智能添加单词: userId={}, word={}, source={}", userId, w, v.getSource());
+        return toVocabularyVO(v);
+    }
+
+    /**
+     * 通过 RestTemplate 调用 ai-service 的 /ai/word-detail 接口
+     */
+    @SuppressWarnings("unchecked")
+    private WordDetailVO fetchWordDetailFromAi(String word) {
+        try {
+            String url = aiServiceUrl + "/ai/word-detail?word=" + java.net.URLEncoder.encode(word, java.nio.charset.StandardCharsets.UTF_8);
+            ResponseEntity<Result> resp = restTemplate.getForEntity(url, Result.class);
+            if (resp.getBody() != null && resp.getBody().getCode() == 200 && resp.getBody().getData() != null) {
+                Map<String, Object> map = (Map<String, Object>) resp.getBody().getData();
+                WordDetailVO vo = new WordDetailVO();
+                vo.setWord((String) map.get("word"));
+                vo.setPhonetic((String) map.get("phonetic"));
+                vo.setPos((String) map.get("pos"));
+                vo.setTranslation((String) map.get("translation"));
+                vo.setExample((String) map.get("example"));
+                vo.setExampleTranslation((String) map.get("exampleTranslation"));
+                vo.setCollocation((String) map.get("collocation"));
+                return vo;
+            }
+        } catch (Exception e) {
+            log.warn("调用 ai-service 生成单词详情失败，word={}: {}", word, e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * 获取今日待复习单词列表
+     * 规则：next_review_at <= 现在 且 isMastered = 0
+     */
+    @Override
+    public List<VocabularyVO> getReviewList(Long userId) {
+        List<UserVocabulary> list = vocabularyMapper.selectList(
+                new LambdaQueryWrapper<UserVocabulary>()
+                        .eq(UserVocabulary::getUserId, userId)
+                        .eq(UserVocabulary::getIsMastered, 0)
+                        .le(UserVocabulary::getNextReviewAt, LocalDateTime.now())
+                        .orderByAsc(UserVocabulary::getNextReviewAt));
+        return list.stream().map(this::toVocabularyVO).collect(Collectors.toList());
+    }
+
+    /**
+     * 提交单词复习结果：
+     *  - 答对：掌握度+1，下次复习时间按新等级延后；若达到最高掌握度且再次答对则标记为已掌握
+     *  - 答错：掌握度重置为0，下次复习时间为明天
+     */
+    @Override
+    public VocabularyVO reviewWord(Long id, Long userId, Boolean isCorrect) {
+        if (isCorrect == null) throw new RuntimeException("复习结果不能为空");
+        UserVocabulary v = vocabularyMapper.selectOne(
+                new LambdaQueryWrapper<UserVocabulary>()
+                        .eq(UserVocabulary::getId, id)
+                        .eq(UserVocabulary::getUserId, userId));
+        if (v == null) throw new RuntimeException("单词不存在");
+
+        int currentMastery = v.getMasteryLevel() == null ? 0 : v.getMasteryLevel();
+        int newMastery;
+        if (isCorrect) {
+            newMastery = EbbinghausUtil.nextMasteryOnCorrect(currentMastery);
+        } else {
+            newMastery = EbbinghausUtil.nextMasteryOnWrong();
+        }
+
+        v.setMasteryLevel(newMastery);
+        v.setReviewCount((v.getReviewCount() == null ? 0 : v.getReviewCount()) + 1);
+        v.setLastReviewedAt(LocalDateTime.now());
+        v.setNextReviewAt(EbbinghausUtil.nextReviewAt(newMastery));
+
+        // 达到最高掌握度且本次答对 → 标记为已掌握
+        if (EbbinghausUtil.isMastered(newMastery, isCorrect)) {
+            v.setIsMastered(1);
+        } else {
+            v.setIsMastered(0);
+        }
+
+        vocabularyMapper.updateById(v);
+        log.info("单词复习: id={}, userId={}, isCorrect={}, newMastery={}, nextReviewAt={}",
+                id, userId, isCorrect, newMastery, v.getNextReviewAt());
+        return toVocabularyVO(v);
+    }
+
     // ============= 学习历史 =============
 
     @Override
-    public List<ExerciseHistoryVO> getExerciseHistory(Long userId, Integer page, Integer size) {
+    public List<ExerciseHistoryVO> getExerciseHistory(Long userId, Integer page, Integer size, Integer moduleType, Integer isCorrect, String startTime) {
         int offset = (page - 1) * size;
+        LambdaQueryWrapper<UserExerciseLog> wrapper = new LambdaQueryWrapper<UserExerciseLog>()
+                .eq(UserExerciseLog::getUserId, userId);
+
+        if (moduleType != null && moduleType != 0) {
+            wrapper.eq(UserExerciseLog::getModuleType, moduleType);
+        }
+        if (isCorrect != null && isCorrect >= 0) {
+            wrapper.eq(UserExerciseLog::getIsCorrect, isCorrect);
+        }
+        if (startTime != null && !startTime.isBlank()) {
+            try {
+                LocalDateTime start = LocalDateTime.parse(startTime);
+                wrapper.ge(UserExerciseLog::getCreatedAt, start);
+            } catch (Exception e) {
+                log.warn("解析 startTime 失败: {}", startTime);
+            }
+        }
+
         List<UserExerciseLog> logs = exerciseLogMapper.selectList(
-                new LambdaQueryWrapper<UserExerciseLog>()
-                        .eq(UserExerciseLog::getUserId, userId)
-                        .orderByDesc(UserExerciseLog::getCreatedAt)
+                wrapper.orderByDesc(UserExerciseLog::getCreatedAt)
                         .last("LIMIT " + offset + "," + size));
 
         List<Long> questionIds = logs.stream()
@@ -858,16 +1129,33 @@ public class ExerciseServiceImpl implements ExerciseService {
         return logs.stream().map(log -> {
             QuestionInfo info = finalInfoMap.get(log.getQuestionId());
             QuestionContent content = finalContentMap.get(log.getQuestionId());
+
+            // 默认取数据库原始值
+            String stem = content != null ? content.getStem() : null;
+            String correctAnswer = content != null ? content.getCorrectAnswer() : null;
+            String userAnswer = log.getUserAnswer();
+
+            // 语法题（moduleType=2）特殊处理：还原完整句子，correctAnswer 和 userAnswer 转为纯文本
+            // 数据库中语法题存的是选择题格式（stem 带 ___ 占位符，correctAnswer 为 "A. xxx"），
+            // 历史记录需要展示为词语排序题形式（完整句子）
+            if (log.getModuleType() != null && log.getModuleType() == 2 && content != null) {
+                String[] display = buildGrammarDisplay(content, userAnswer);
+                stem = display[0];
+                correctAnswer = display[1];
+                userAnswer = display[2];
+            }
+
             return ExerciseHistoryVO.builder()
                     .logId(log.getId())
                     .questionId(log.getQuestionId())
-                    .stem(content != null ? content.getStem() : null)
-                    .userAnswer(log.getUserAnswer())
-                    .correctAnswer(content != null ? content.getCorrectAnswer() : null)
+                    .stem(stem)
+                    .userAnswer(userAnswer)
+                    .correctAnswer(correctAnswer)
                     .isCorrect(log.getIsCorrect())
                     .durationSeconds(log.getDurationSeconds())
                     .moduleType(log.getModuleType())
                     .questionType(info != null ? info.getQuestionType() : null)
+                    .analysis(content != null ? content.getAnalysis() : null)
                     .difficultyLevel(info != null ? info.getDifficultyLevel() : null)
                     .createdAt(log.getCreatedAt())
                     .build();
@@ -875,9 +1163,294 @@ public class ExerciseServiceImpl implements ExerciseService {
     }
 
     @Override
-    public long getExerciseHistoryCount(Long userId) {
-        return exerciseLogMapper.selectCount(
-                new LambdaQueryWrapper<UserExerciseLog>()
-                        .eq(UserExerciseLog::getUserId, userId));
+    public long getExerciseHistoryCount(Long userId, Integer moduleType, Integer isCorrect, String startTime) {
+        LambdaQueryWrapper<UserExerciseLog> wrapper = new LambdaQueryWrapper<UserExerciseLog>()
+                .eq(UserExerciseLog::getUserId, userId);
+
+        if (moduleType != null && moduleType != 0) {
+            wrapper.eq(UserExerciseLog::getModuleType, moduleType);
+        }
+        if (isCorrect != null && isCorrect >= 0) {
+            wrapper.eq(UserExerciseLog::getIsCorrect, isCorrect);
+        }
+        if (startTime != null && !startTime.isBlank()) {
+            try {
+                LocalDateTime start = LocalDateTime.parse(startTime);
+                wrapper.ge(UserExerciseLog::getCreatedAt, start);
+            } catch (Exception e) {
+                log.warn("解析 startTime 失败: {}", startTime);
+            }
+        }
+
+        return exerciseLogMapper.selectCount(wrapper);
+    }
+
+    /**
+     * 对语法题（moduleType=2）做展示转换：
+     * 数据库中语法题以选择题格式存储（stem 带 ___ 占位符，correctAnswer 为 "A. xxx"），
+     * 此方法将其还原为词语排序题的展示形式：
+     * 1. 从 correctAnswer 中去掉选项前缀（如 "A. "），提取纯文本
+     * 2. 用纯文本替换 stem 中的占位符（___、[BLANK]、...），生成完整句子
+     * 3. 如果 userAnswer 是选项字母（如 "C"），从 options 中提取对应选项文本
+     *
+     * @param content    题目内容
+     * @param userAnswer 用户原始答案
+     * @return String[3]，[0]=完整句子 stem，[1]=纯文本 correctAnswer，[2]=转换后的 userAnswer
+     */
+    private String[] buildGrammarDisplay(QuestionContent content, String userAnswer) {
+        String stem = content.getStem();
+        String correctAnswer = content.getCorrectAnswer();
+
+        if (stem == null || correctAnswer == null) {
+            return new String[]{stem, correctAnswer, userAnswer};
+        }
+
+        // 从 correctAnswer 中去掉选项前缀（如 "A. "、"B、 "、"C) "）
+        String correctText = stripOptionPrefix(correctAnswer);
+
+        // 如果 correctText 仍然是单个字母（A-D），说明数据库中只存储了选项字母，
+        // 需要从 options 中提取对应选项的文本
+        if (correctText != null && correctText.length() == 1 
+                && Character.toUpperCase(correctText.charAt(0)) >= 'A' 
+                && Character.toUpperCase(correctText.charAt(0)) <= 'D') {
+            String optionText = getOptionTextByKey(content.getOptions(), correctText.toUpperCase());
+            if (optionText != null && !optionText.isEmpty()) {
+                correctText = optionText;
+            }
+        }
+
+        // 用选项文本替换 stem 中的占位符（___两个以上下划线、[BLANK]、...三个以上点）
+        String replaced = stem.replaceAll("_{2,}|\\[BLANK\\]|\\.{3,}", correctText);
+
+        // 清理内联选项字母：无论是否替换了占位符，都需要移除 stem 中直接包含的大写选项字母 A-D
+        // 避免选项字母残留（如 "Only C C solve" → "Only can we solve"）
+        String cleaned = replaced.replaceAll("\\b[A-D]\\b", correctText);
+
+        String fullStem = cleaned.replaceAll("\\s+", " ")
+                .trim();
+
+        // 处理 userAnswer：如果是字母（A/B/C/D）或 "A. xxx" 格式，转为纯文本
+        // 优先从 options 中提取对应选项的原文单词，避免用选项字母代替原文
+        String displayUserAnswer = userAnswer;
+        if (userAnswer != null && !userAnswer.isEmpty()) {
+            String userKey = extractAnswerKey(userAnswer);
+            // 如果提取出的 key 是单字母 A-D，说明是选择题格式，从 options 中提取对应选项文本
+            if (userKey.length() == 1 && userKey.charAt(0) >= 'A' && userKey.charAt(0) <= 'D') {
+                String optionText = getOptionTextByKey(content.getOptions(), userKey);
+                if (optionText != null) {
+                    displayUserAnswer = optionText;
+                } else {
+                    // options 解析失败兜底：保留用户原始答案（字母），不做"选项X"的伪装替换
+                    displayUserAnswer = userAnswer;
+                }
+            }
+        }
+
+        return new String[]{fullStem, correctText, displayUserAnswer};
+    }
+
+    /**
+     * 去掉答案文本的选项前缀（如 "A. "、"B、 "、"C) "、"D " → 纯文本）
+     * 如果不以选项字母开头，说明已经是纯文本，不做处理
+     */
+    private String stripOptionPrefix(String answer) {
+        if (answer == null || answer.isEmpty()) {
+            return answer;
+        }
+        char first = Character.toUpperCase(answer.charAt(0));
+        if (first >= 'A' && first <= 'D') {
+            String removed = answer.replaceFirst("^[A-Da-d][.、)\\s]+\\s*", "").trim();
+            if (!removed.isEmpty()) {
+                return removed;
+            }
+        }
+        return answer;
+    }
+
+    /**
+     * 从 options JSON 字符串中，按选项字母（A/B/C/D）提取对应选项的纯文本
+     * options 格式示例：["A. established", "B. establish", "C. establishes", "D. establishing"]
+     * 也兼容无前缀格式：["established", "establish", "establishes", "establishing"]
+     *
+     * @param optionsJson options JSON 字符串
+     * @param key         选项字母（A/B/C/D）
+     * @return 选项纯文本，解析失败返回 null
+     */
+    private String getOptionTextByKey(String optionsJson, String key) {
+        if (optionsJson == null || optionsJson.isEmpty() || key == null || key.isEmpty()) {
+            return null;
+        }
+        try {
+            // 解析 options JSON 数组
+            List<String> options = new com.fasterxml.jackson.databind.ObjectMapper()
+                    .readValue(optionsJson, new com.fasterxml.jackson.core.type.TypeReference<List<String>>() {});
+            int idx = key.toUpperCase().charAt(0) - 'A';
+            if (idx >= 0 && idx < options.size()) {
+                return stripOptionPrefix(options.get(idx));
+            }
+        } catch (Exception e) {
+            // JSON 解析失败，尝试按换行符分割
+            String[] lines = optionsJson.split("\\n|\\\\n");
+            int idx = key.toUpperCase().charAt(0) - 'A';
+            if (idx >= 0 && idx < lines.length) {
+                return stripOptionPrefix(lines[idx].replaceFirst("^[A-Da-d][.、)\\s]+\\s*", "").trim());
+            }
+        }
+        return null;
+    }
+
+    // ============= 错题驱动同类题生成 =============
+
+    /**
+     * 获取用户薄弱知识点列表
+     * 查询用户所有未解决错题，统计每个知识点出现次数，按次数降序返回前10个
+     */
+    @Override
+    public List<WeakKnowledgePoint> getWeakKnowledgePoints(Long userId) {
+        // 1. 查询用户所有未解决错题（isResolved=0）
+        List<UserErrorBook> errors = errorBookMapper.selectList(
+                new LambdaQueryWrapper<UserErrorBook>()
+                        .eq(UserErrorBook::getUserId, userId)
+                        .eq(UserErrorBook::getIsResolved, 0));
+        if (errors.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // 2. 提取所有错题ID
+        List<Long> questionIds = errors.stream()
+                .map(UserErrorBook::getQuestionId)
+                .distinct()
+                .collect(Collectors.toList());
+
+        // 3. 查询题目-知识点映射关系（多对多）
+        List<KnowledgeMapping> mappings = knowledgeMappingMapper.selectList(
+                new LambdaQueryWrapper<KnowledgeMapping>()
+                        .in(KnowledgeMapping::getQuestionId, questionIds));
+        if (mappings.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // 4. 统计每个知识点的错题出现次数
+        Map<Long, Integer> countMap = new HashMap<>();
+        for (KnowledgeMapping mapping : mappings) {
+            countMap.merge(mapping.getKnowledgePointId(), 1, Integer::sum);
+        }
+
+        // 5. 批量查询知识点名称
+        List<Long> kpIds = new ArrayList<>(countMap.keySet());
+        Map<Long, String> nameMap = new HashMap<>();
+        if (!kpIds.isEmpty()) {
+            List<SysKnowledgePoint> kps = knowledgePointMapper.selectBatchIds(kpIds);
+            for (SysKnowledgePoint kp : kps) {
+                nameMap.put(kp.getId(), kp.getName());
+            }
+        }
+
+        // 6. 按错误次数降序排序，取前10个
+        Map<Long, String> finalNameMap = nameMap;
+        return countMap.entrySet().stream()
+                .sorted(Map.Entry.<Long, Integer>comparingByValue().reversed())
+                .limit(10)
+                .map(entry -> WeakKnowledgePoint.builder()
+                        .knowledgePointId(entry.getKey())
+                        .knowledgePointName(finalNameMap.getOrDefault(entry.getKey(), "未知知识点"))
+                        .errorCount(entry.getValue())
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * 根据错题生成同类强化练习题
+     * 优先从正式题库中取同知识点、同难度、同题型的题目，
+     * 不足部分通过 AI 生成并直接入库（无需审核，标记为PENDING）
+     */
+    @Override
+    public List<QuestionVO> generateSimilarQuestions(Long userId, Long questionId, int count) {
+        if (count <= 0 || count > 20) {
+            count = 5;
+        }
+
+        // 1. 获取原题信息
+        QuestionInfo questionInfo = questionInfoMapper.selectById(questionId);
+        if (questionInfo == null) {
+            throw new RuntimeException("题目不存在");
+        }
+
+        // 2. 查询该题关联的知识点
+        List<KnowledgeMapping> mappings = knowledgeMappingMapper.selectList(
+                new LambdaQueryWrapper<KnowledgeMapping>()
+                        .eq(KnowledgeMapping::getQuestionId, questionId));
+        if (mappings.isEmpty()) {
+            // 无知识点映射，退回使用智能选题（同模块、同题型）
+            return selectQuestions(userId, questionInfo.getModuleType(), count);
+        }
+
+        Long knowledgePointId = mappings.get(0).getKnowledgePointId();
+        SysKnowledgePoint kp = knowledgePointMapper.selectById(knowledgePointId);
+        String kpName = kp != null ? kp.getName() : "未知知识点";
+
+        // 3. 从正式题库中查询同类题目（同知识点、同模块、同题型、同难度，排除自身）
+        List<QuestionInfo> existing = questionInfoMapper.selectList(
+                new LambdaQueryWrapper<QuestionInfo>()
+                        .eq(QuestionInfo::getKnowledgePointId, knowledgePointId)
+                        .eq(QuestionInfo::getModuleType, questionInfo.getModuleType())
+                        .eq(QuestionInfo::getQuestionType, questionInfo.getQuestionType())
+                        .eq(QuestionInfo::getIsDeleted, 0)
+                        .ne(QuestionInfo::getId, questionId)
+                        .orderByAsc(QuestionInfo::getUsageCount)
+                        .last("LIMIT " + count));
+
+        List<QuestionVO> result = new ArrayList<>();
+
+        // 4. 已有正式题库题目 → 优先使用
+        for (QuestionInfo qi : existing) {
+            result.add(toQuestionVO(qi, false));
+            // 更新使用次数
+            qi.setUsageCount(qi.getUsageCount() + 1);
+            questionInfoMapper.updateById(qi);
+        }
+
+        int remaining = count - result.size();
+        if (remaining <= 0) {
+            log.info("同类题生成: 正式题库已有足够题目，共{}题", result.size());
+            return result;
+        }
+
+        // 5. 正式题库不足 → 调用 AI 生成剩余题目
+        String questionType = questionInfo.getQuestionType();
+        if (questionType == null || questionType.isBlank()) {
+            questionType = "FILL_BLANK";
+        }
+
+        log.info("同类题生成: 正式题库{}题，需AI生成{}题, knowledgePoint={}, difficulty={}, type={}",
+                result.size(), remaining, kpName, questionInfo.getDifficultyLevel(), questionType);
+
+        List<QuestionPending> generated = questionGenerateService.generateAndSaveDirectly(
+                kpName,
+                questionInfo.getTargetLevel(),
+                questionInfo.getDifficultyLevel(),
+                questionType,
+                questionInfo.getModuleType(),
+                remaining);
+
+        // 6. 将生成的待审核题目转换为 QuestionVO 返回给前端（含答案，供练习用）
+        for (QuestionPending pending : generated) {
+            QuestionVO vo = QuestionVO.builder()
+                    .id(pending.getId()) // 使用 pending 的 ID 作为临时ID
+                    .moduleType(pending.getModuleType())
+                    .difficultyLevel(pending.getDifficultyLevel())
+                    .questionType(pending.getQuestionType())
+                    .stem(pending.getStem())
+                    .options(pending.getOptions())
+                    .correctAnswer(pending.getCorrectAnswer()) // 练习模式下展示答案
+                    .analysis(pending.getAnalysis())
+                    .showAnswer(true)
+                    .build();
+            result.add(vo);
+        }
+
+        log.info("同类题生成完成: 共返回{}题（正式题库{}题 + AI生成{}题）",
+                result.size(), result.size() - generated.size(), generated.size());
+        return result;
     }
 }

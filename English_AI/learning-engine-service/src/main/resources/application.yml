@@ -1,0 +1,37 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: learning-engine-service
+
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/learning_db?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:123456}
+
+  # RabbitMQ 消息队列（本地无RabbitMQ时设为enabled: false）
+  rabbitmq:
+    enabled: false
+    host: localhost
+    port: 5672
+    username: ${RABBITMQ_USERNAME:admin}
+    password: ${RABBITMQ_PASSWORD:admin}
+    listener:
+      simple:
+        acknowledge-mode: manual
+
+mybatis-plus:
+  type-aliases-package: com.english.ai.learning.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: auto
+
+# 服务间调用地址（生产用环境变量覆盖为 docker 服务名）
+service:
+  exercise:
+    url: ${EXERCISE_SERVICE_URL:http://localhost:8082}

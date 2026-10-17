@@ -1,0 +1,48 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: user-service
+
+  # 文件上传配置
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
+
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/user_db?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:123456}
+
+# 头像文件存储配置
+avatar:
+  # 存储目录（绝对路径），默认为项目根目录下的 uploads/avatars
+  upload-dir: ${AVATAR_UPLOAD_DIR:./uploads/avatars}
+
+# MyBatis-Plus 配置
+mybatis-plus:
+  # 实体类存放位置
+  type-aliases-package: com.english.ai.user.entity
+  # XML映射文件（暂不使用，用注解）
+  mapper-locations: classpath*:/mapper/**/*.xml
+  configuration:
+    # 驼峰转下划线（sys_user → SysUser）
+    map-underscore-to-camel-case: true
+    # SQL日志（开发环境）
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      # 逻辑删除字段
+      logic-delete-field: isDeleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+      # 主键策略
+      id-type: auto
+
+# JWT 配置（开发环境）
+jwt:
+  secret: ${JWT_SECRET:EnglishAI-Local-Dev-JWT-Secret-Key-Change-Me-32-Bytes}
+  expiration: ${JWT_EXPIRATION:604800000}  # 7天(毫秒)

@@ -1,0 +1,63 @@
+// ============================================
+// Recall — SCSS Mixins
+// ============================================
+
+// 毛玻璃卡片
+@mixin glass-card {
+  background: var(--bg-glass);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+}
+
+// 霓虹发光
+@mixin neon-glow($color: 99, 102, 241) {
+  box-shadow: 0 0 20px rgba($color, 0.3), 0 0 60px rgba($color, 0.1);
+}
+
+// 文字渐变
+@mixin text-gradient($gradient: var(--brand-gradient)) {
+  background: $gradient;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+// 页面进入动画
+@mixin page-enter {
+  animation: fadeSlideUp var(--duration-slow) var(--ease-out-expo);
+}
+
+// 卡片悬浮
+@mixin card-hover {
+  transition: transform var(--duration-normal) var(--ease-out-expo),
+              box-shadow var(--duration-normal) var(--ease-out-expo);
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-glow);
+  }
+}
+
+// 按钮点击缩放
+@mixin btn-press {
+  transition: transform var(--duration-fast) var(--ease-out-expo);
+  &:active {
+    transform: scale(0.96);
+  }
+}
+
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 8px rgba(99, 102, 241, 0.4); }
+  50%      { box-shadow: 0 0 24px rgba(139, 92, 246, 0.7); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}

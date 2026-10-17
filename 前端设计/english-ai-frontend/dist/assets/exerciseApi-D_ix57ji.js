@@ -1,0 +1,1 @@
+import{r as s}from"./request-DlOR3_ck.js";function t(){return s.get("/exercise/assess-questions")}function o(e){return s.get("/exercise/questions",{params:e})}function n(e){return s.post("/exercise/submit",e)}function i(e){return s.get(`/exercise/error-book/${e}`)}export{t as a,i as b,o as g,n as s};

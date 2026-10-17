@@ -1,0 +1,38 @@
+server:
+  port: 8086
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      # 全局CORS
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOriginPatterns: "*"
+            allowedMethods: "*"
+            allowedHeaders: "*"
+            allowCredentials: true
+      # 路由规则（uri 通过环境变量覆盖，本地默认 localhost，生产用 docker 服务名）
+      routes:
+        - id: user-service
+          uri: ${USER_SERVICE_URL:http://localhost:8081}
+          predicates:
+            - Path=/user/**
+        - id: exercise-service
+          uri: ${EXERCISE_SERVICE_URL:http://localhost:8082}
+          predicates:
+            - Path=/exercise/**
+        - id: learning-engine-service
+          uri: ${LEARNING_SERVICE_URL:http://localhost:8083}
+          predicates:
+            - Path=/learning/**
+        - id: ai-service
+          uri: ${AI_SERVICE_URL:http://localhost:8084}
+          predicates:
+            - Path=/ai/**
+# JWT配置（与user-service一致）
+jwt:
+  secret: ${JWT_SECRET:EnglishAI-Local-Dev-JWT-Secret-Key-Change-Me-32-Bytes}
+  expiration: ${JWT_EXPIRATION:604800000}

@@ -1,0 +1,1 @@
+import{r}from"./request-DlOR3_ck.js";function e(s){return r.post("/user/login",s)}function u(s){return r.post("/user/register",s)}function n(s){return r.get(`/user/radar/${s}`)}function a(s){return r.post("/user/assess/submit",s)}export{n as g,e as l,u as r,a as s};

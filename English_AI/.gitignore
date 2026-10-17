@@ -1,0 +1,28 @@
+# IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Java maven
+target/
+*.class
+*.jar
+
+# 前端
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.env.local
+
+# 本地文件
+uploads/
+.uploads/
+.env
+
+# 日志
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

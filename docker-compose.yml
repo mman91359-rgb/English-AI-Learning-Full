@@ -1,0 +1,162 @@
+# ==========================================================
+# English AI 学习系统 —— 生产部署编排文件
+# 架构：frontend(nginx:80/443) 唯一对外入口 -> api-gateway -> 5个微服务 + MySQL
+# 后端服务全部走内网，不映射宿主端口；仅 frontend 暴露 80/443
+# 使用：docker compose --env-file .env up -d --build
+# ==========================================================
+
+services:
+  # ---------------- 中间件：MySQL 8 ----------------
+  mysql:
+    image: mysql:8.0
+    container_name: english-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      TZ: Asia/Shanghai
+    command:
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+    volumes:
+      # 数据持久化（命名卷）
+      - mysql_data:/var/lib/mysql
+      # 首次启动自动执行初始化 SQL（建库建表），把导出的 init.sql 放到 ./sql/init/
+      - ./sql/init:/docker-entrypoint-initdb.d
+    ports:
+      # 如需在宿主机用 Navicat 连库调试，开放 3306；正式上线可注释掉
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - english-net
+
+  # ---------------- 业务服务：user-service ----------------
+  user-service:
+    build:
+      context: .
+      dockerfile: user-service/Dockerfile
+    container_name: english-user-service
+    restart: on-failure:5
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USERNAME: ${MYSQL_USERNAME}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      AVATAR_UPLOAD_DIR: /app/uploads/avatars
+    volumes:
+      # 头像持久化：宿主机 ./uploads/avatars <-> 容器内
+      - ./uploads/avatars:/app/uploads/avatars
+    networks:
+      - english-net
+
+  # ---------------- 业务服务：exercise-service ----------------
+  exercise-service:
+    build:
+      context: .
+      dockerfile: exercise-service/Dockerfile
+    container_name: english-exercise-service
+    restart: on-failure:5
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USERNAME: ${MYSQL_USERNAME}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      # 服务间调用走 docker 服务名
+      USER_SERVICE_URL: http://user-service:8081
+      LEARNING_SERVICE_URL: http://learning-engine-service:8083
+    networks:
+      - english-net
+
+  # ---------------- 业务服务：learning-engine-service ----------------
+  learning-engine-service:
+    build:
+      context: .
+      dockerfile: learning-engine-service/Dockerfile
+    container_name: english-learning-service
+    restart: on-failure:5
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USERNAME: ${MYSQL_USERNAME}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      EXERCISE_SERVICE_URL: http://exercise-service:8082
+    networks:
+      - english-net
+
+  # ---------------- 业务服务：ai-service ----------------
+  ai-service:
+    build:
+      context: .
+      dockerfile: ai-service/Dockerfile
+    container_name: english-ai-service
+    restart: on-failure:5
+    environment:
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
+      DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL}
+      DASHSCOPE_MODEL: ${DASHSCOPE_MODEL}
+    networks:
+      - english-net
+
+  # ---------------- 网关：api-gateway ----------------
+  api-gateway:
+    build:
+      context: .
+      dockerfile: api-gateway/Dockerfile
+    container_name: english-api-gateway
+    restart: on-failure:5
+    depends_on:
+      - user-service
+      - exercise-service
+      - learning-engine-service
+      - ai-service
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      USER_SERVICE_URL: http://user-service:8081
+      EXERCISE_SERVICE_URL: http://exercise-service:8082
+      LEARNING_SERVICE_URL: http://learning-engine-service:8083
+      AI_SERVICE_URL: http://ai-service:8084
+    networks:
+      - english-net
+
+  # ---------------- 前端 + Nginx（唯一对外入口） ----------------
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: english-frontend
+    restart: unless-stopped
+    depends_on:
+      - api-gateway
+    ports:
+      # 对外只开 80 和 443
+      - "80:80"
+      - "443:443"
+    volumes:
+      # SSL 证书挂载（宿主机 ./certs 目录，放 fullchain.pem 和 privkey.pem）
+      - ./certs:/etc/nginx/certs:ro
+    networks:
+      - english-net
+
+# ---------------- 网络 ----------------
+networks:
+  english-net:
+    driver: bridge
+
+# ---------------- 持久化卷 ----------------
+volumes:
+  mysql_data:

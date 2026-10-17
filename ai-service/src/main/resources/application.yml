@@ -1,0 +1,14 @@
+server:
+  port: 8084
+
+spring:
+  application:
+    name: ai-service
+
+# 阿里云百炼 API 配置（MaaS - OpenAI 兼容接口）
+dashscope:
+  api-key: ${DASHSCOPE_API_KEY:sk-ws-H.RXRYMIH.l7lY.MEYCIQC5PpH5lmGM5RiYYEGyrAXJpzQY3-e9y8FaqVJxHOTj8QIhAJkfohy-Gap9yumH8BhDqfhw2dADYaaR1BDFi9hBybRW}
+  base-url: ${DASHSCOPE_BASE_URL:https://ws-o7jzsyw9n38k9b7p.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}
+  model: ${DASHSCOPE_MODEL:qwen-plus}
+  max-tokens: ${DASHSCOPE_MAX_TOKENS:1500}
+  temperature: ${DASHSCOPE_TEMPERATURE:0.7}

@@ -84,7 +84,9 @@ public class UserServiceImpl implements UserService {
         return LoginResponse.builder()
                 .token(token)
                 .userId(user.getId())
-                .username(user.getUsername())
+                .username(user.getUsername(
+
+                ))
                 .nickname(user.getNickname())
                 .avatarUrl(user.getAvatarUrl())
                 .phone(user.getPhone())

@@ -1,0 +1,30 @@
+# Docker 构建上下文忽略文件，加速构建、避免泄露敏感信息
+**/target
+**/build
+**/.idea
+**/*.iml
+**/*.log
+.git
+.gitignore
+
+# 前端依赖与构建产物（容器内重新安装）
+frontend/node_modules
+frontend/dist
+
+# 头像图片（通过卷挂载，不需要打进镜像）
+uploads/avatars/*
+
+# SSL 证书（敏感，通过卷挂载）
+certs/*.pem
+
+# 本地配置文件
+.env
+.env.local
+
+# Python 脚本与临时文件
+*.py
+_*.txt
+
+# 系统文件
+Thumbs.db
+.DS_Store
